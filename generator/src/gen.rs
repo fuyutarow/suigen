@@ -11,7 +11,7 @@ use move_model_2::model::{self, Datatype, SourceKind, WITH_SOURCE};
 use move_symbol_pool::Symbol;
 
 #[rustfmt::skip]
-const JS_RESERVED_WORDS: [&str; 64] = [
+pub const JS_RESERVED_WORDS: [&str; 64] = [
     "abstract", "arguments", "await", "boolean", "break", "byte", "case", "catch",
     "char", "class", "const", "continue", "debugger", "default", "delete", "do",
     "double", "else", "enum", "eval", "export", "extends", "false", "final",

@@ -191,6 +191,71 @@ async fn main() -> Result<()> {
         &out_root.join(".eslintrc.json"),
     )?;
 
+    // Generate a top-level barrel file that re-exports all packages
+    gen_top_level_barrel_file(
+        &out_root,
+        &source_top_level_addr_map,
+        &on_chain_top_level_addr_map,
+    )?;
+
+    Ok(())
+}
+
+/// Generates a top-level barrel file (index.ts) that re-exports all packages
+fn gen_top_level_barrel_file(
+    out_root: &Path,
+    source_top_level_pkg_names: &BTreeMap<AccountAddress, Symbol>,
+    on_chain_top_level_pkg_names: &BTreeMap<AccountAddress, Symbol>,
+) -> Result<()> {
+    let mut barrel_content = String::new();
+    let mut exported_names = BTreeSet::new();
+
+    // Helper function to generate a safe import name that handles JavaScript reserved words
+    let get_safe_import_name = |pkg_name: Symbol| {
+        let import_name = package_import_name(pkg_name);
+        // Check if the import name is a JavaScript reserved word
+        if suigen::gen::JS_RESERVED_WORDS.contains(&import_name.as_str()) {
+            format!("{}_pkg", import_name)
+        } else {
+            import_name
+        }
+    };
+
+    // Add exports for source packages
+    for (_, pkg_name) in source_top_level_pkg_names.iter() {
+        let safe_import_name = get_safe_import_name(*pkg_name);
+
+        // Skip if we've already exported this name (avoids duplicates)
+        if !exported_names.insert(safe_import_name.clone()) {
+            continue;
+        }
+
+        barrel_content.push_str(&format!(
+            "export * as {} from './{}';\n",
+            safe_import_name, safe_import_name
+        ));
+    }
+
+    // Add exports for on-chain packages
+    for (_, pkg_name) in on_chain_top_level_pkg_names.iter() {
+        let safe_import_name = get_safe_import_name(*pkg_name);
+
+        // Skip if we've already exported this name (avoids duplicates)
+        if !exported_names.insert(safe_import_name.clone()) {
+            continue;
+        }
+
+        barrel_content.push_str(&format!(
+            "export * as {} from './{}';\n",
+            safe_import_name, safe_import_name
+        ));
+    }
+
+    // Write the barrel file
+    if !barrel_content.is_empty() {
+        write_str_to_file(&barrel_content, &out_root.join("index.ts"))?;
+    }
+
     Ok(())
 }
 
@@ -313,8 +378,28 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
         let is_top_level = top_level_pkg_names.contains_key(pkg_id);
         let levels_from_root = if is_top_level { 0 } else { 2 };
 
+        // Get the safe package import name
+        let safe_pkg_import_name = match top_level_pkg_names.get(pkg_id) {
+            Some(pkg_name) => {
+                let import_name = package_import_name(*pkg_name);
+                // Check if the import name is a JavaScript reserved word
+                if suigen::gen::JS_RESERVED_WORDS.contains(&import_name.as_str()) {
+                    format!("{}_pkg", import_name)
+                } else {
+                    import_name
+                }
+            }
+            None => {
+                let dep_dir = match is_source {
+                    true => "source",
+                    false => "onchain",
+                };
+                format!("{}/{}", dep_dir, pkg_id.to_hex_literal())
+            }
+        };
+
         let package_path = out_root.join(match top_level_pkg_names.get(pkg_id) {
-            Some(pkg_name) => PathBuf::from(package_import_name(*pkg_name)),
+            Some(_) => PathBuf::from(safe_pkg_import_name),
             None => PathBuf::from("_dependencies")
                 .join(match is_source {
                     true => "source",
@@ -325,11 +410,24 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
 
         std::fs::create_dir_all(&package_path)?;
 
-        // Generate module paths for the export statements
-        let module_imports = pkg
-            .modules()
-            .map(|module| module_import_name(module.name()))
-            .collect::<Vec<_>>();
+        // Generate module paths for the export statements and check if each module has files
+        let mut validated_modules = Vec::new();
+        for module in pkg.modules() {
+            let module_name = module_import_name(module.name());
+            let module_path = package_path.join(&module_name);
+
+            // Create the module directory
+            std::fs::create_dir_all(&module_path)?;
+
+            // Only include modules that will contain files
+            // Check if the module has any functions or structs
+            let has_functions = module.functions().next().is_some();
+            let has_structs = module.structs().next().is_some();
+
+            if has_functions || has_structs {
+                validated_modules.push((module, module_name));
+            }
+        }
 
         // Generate constants.ts with package metadata
         let published_at = published_at_map.get(pkg_id).unwrap_or(pkg_id);
@@ -356,13 +454,23 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
         let mut index_content =
             String::from("// Re-export package constants\nexport * from './constants';\n\n");
 
-        // Add module exports with namespaces
-        index_content.push_str("// Module exports\n");
-        for module_name in &module_imports {
-            index_content.push_str(&format!(
-                "export * as {} from './{}';\n",
-                module_name, module_name
-            ));
+        // Add module exports with namespaces, but only for modules with files
+        if !validated_modules.is_empty() {
+            index_content.push_str("// Module exports\n");
+            for (_, module_name) in &validated_modules {
+                // Check if module name is a reserved word and add suffix if needed
+                let safe_module_name =
+                    if suigen::gen::JS_RESERVED_WORDS.contains(&module_name.as_str()) {
+                        format!("{}_mod", module_name)
+                    } else {
+                        module_name.clone()
+                    };
+
+                index_content.push_str(&format!(
+                    "export * as {} from './{}';\n",
+                    safe_module_name, module_name
+                ));
+            }
         }
 
         write_str_to_file(&index_content, &package_path.join("index.ts"))?;
@@ -372,9 +480,8 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
         write_tokens_to_file(&tokens, &package_path.join("init.ts"))?;
 
         // generate modules
-        for module in pkg.modules() {
-            let module_path = package_path.join(module_import_name(module.name()));
-            std::fs::create_dir_all(&module_path)?;
+        for (module, module_name) in validated_modules {
+            let module_path = package_path.join(&module_name);
 
             // generate <module>/functions.ts
             if is_top_level {
@@ -456,6 +563,11 @@ fn gen_module_barrel_file(module_path: &Path) -> Result<()> {
                 }
             }
         }
+    }
+
+    // Skip creating barrel file if there are no files to export
+    if export_files.is_empty() {
+        return Ok(());
     }
 
     // Generate the barrel file content with re-exports
