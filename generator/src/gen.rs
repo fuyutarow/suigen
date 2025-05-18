@@ -32,19 +32,23 @@ const JS_STRICTLY_RESERVED_WORDS: [&str; 37] = [
 ];
 
 /// Returns module name that's used in import paths (converts kebab case as that's idiomatic in TS).
+/// In TypeScript variable/module names, hyphens are not allowed, so we convert to underscores.
 pub fn module_import_name(module: Symbol) -> String {
     module
         .to_string()
         .from_case(Case::Snake)
         .to_case(Case::Kebab)
+        .replace("-", "_")
 }
 
 /// Returns package name that's used in import paths (converts to kebab case as that's idiomatic in TS).
+/// In TypeScript variable/module names, hyphens are not allowed, so we convert to underscores.
 pub fn package_import_name(pkg_name: Symbol) -> String {
     pkg_name
         .to_string()
         .from_case(Case::Pascal)
         .to_case(Case::Kebab)
+        .replace("-", "_")
 }
 
 fn struct_full_name<const HAS_SOURCE: SourceKind>(s: &model::Struct<HAS_SOURCE>) -> String {
