@@ -5,9 +5,8 @@ A tool for generating TS SDKs for Sui Move smart contracts. Supports code genera
 ## Quick Start
 
 1. Install the generator by either:
-
-   - `cargo install --locked --git https://github.com/kunalabs-io/sui-client-gen.git` (you might have to install some [build dependencies](https://docs.sui.io/guides/developer/getting-started/sui-install#all-linux-prerequisites))
-   - or downloading a binary from https://github.com/kunalabs-io/sui-client-gen/releases/
+   - `cargo install --locked --git https://github.com/fuyutarow/suigen` (you might have to install some [build dependencies](https://docs.sui.io/guides/developer/getting-started/sui-install#all-linux-prerequisites))
+   - or downloading a binary from <https://github.com/kunalabs-io/sui-client-gen/releases/>
 
 2. Create a new directory and in it a `gen.toml` file like so:
 
@@ -228,8 +227,8 @@ specialTypes(tx, {
 
 ## Caveats
 
-- When specifying both source and on-chain packages, the generator will currently generate two separate dependency graphs (one for on-chain and one for source). This is due to a technical detail and will be resolved in a future version so that only a single dependency graph is generated (https://github.com/kunalabs-io/sui-client-gen/issues/1#issuecomment-1554754842).
-- Since whitespace detection relies on some Rust nightly features which are currently unstable (https://github.com/udoprog/genco/issues/39#issuecomment-1569076737), the generated code is not formatted nicely. Usage of formatters on the generated code (e.g., `prettier`, `eslint`) is recommended.
+- When specifying both source and on-chain packages, the generator will currently generate two separate dependency graphs (one for on-chain and one for source). This is due to a technical detail and will be resolved in a future version so that only a single dependency graph is generated (<https://github.com/kunalabs-io/sui-client-gen/issues/1#issuecomment-1554754842>).
+- Since whitespace detection relies on some Rust nightly features which are currently unstable (<https://github.com/udoprog/genco/issues/39#issuecomment-1569076737>), the generated code is not formatted nicely. Usage of formatters on the generated code (e.g., `prettier`, `eslint`) is recommended.
 - Because ESLint renames some types (e.g., `String` -> `string`) due to the `@typescript-eslint/ban-types` rule which breaks the generated code, an `.eslintrc.json` file is generated in the root directory to turn off this rule.
 - When re-running the generator, the files generated on previous run will _not_ be automatically deleted in order to avoid accidental data wipes. The old files can either be deleted manually before re-running the tool (it's safe to delete everything aside from `gen.toml`) or by running the generator with `--clean` (use with caution).
 
