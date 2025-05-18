@@ -312,7 +312,7 @@ fn gen_full_name_with_address<const HAS_SOURCE: SourceKind>(
             self_addr.to_hex_literal()
         )
     });
-    let pkg_import = js::import("../index", format!("PKG_V{}", version.value()));
+    let pkg_import = js::import("../constants", format!("PKG_V{}", version.value()));
 
     // `${PKG_V1}::module::name`
     let mut toks = js::Tokens::new();

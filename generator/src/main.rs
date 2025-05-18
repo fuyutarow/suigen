@@ -331,27 +331,33 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
             .map(|module| module_import_name(module.name()))
             .collect::<Vec<_>>();
 
-        // generate index.ts with metadata and module exports
+        // Generate constants.ts with package metadata
         let published_at = published_at_map.get(pkg_id).unwrap_or(pkg_id);
         let versions = version_table.get(pkg_id).unwrap();
-        let mut index_content = format!(
+        let mut constants_content = format!(
             "export const PACKAGE_ID = '{}';\n\
              export const PUBLISHED_AT = '{}';\n",
             pkg_id.to_hex_literal(),
             published_at.to_hex_literal()
         );
 
-        // Add version exports
+        // Add version exports to constants.ts
         for (published_at, version) in versions {
-            index_content.push_str(&format!(
+            constants_content.push_str(&format!(
                 "export const PKG_V{} = '{}';\n",
                 version.value(),
                 published_at.to_hex_literal()
             ));
         }
 
+        write_str_to_file(&constants_content, &package_path.join("constants.ts"))?;
+
+        // generate index.ts that re-exports constants and modules
+        let mut index_content =
+            String::from("// Re-export package constants\nexport * from './constants';\n\n");
+
         // Add module exports with namespaces
-        index_content.push_str("\n// Module exports\n");
+        index_content.push_str("// Module exports\n");
         for module_name in &module_imports {
             index_content.push_str(&format!(
                 "export * as {} from './{}';\n",
