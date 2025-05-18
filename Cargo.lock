@@ -7555,6 +7555,7 @@ dependencies = [
  "move-model-2",
  "move-package",
  "move-symbol-pool",
+ "once_cell",
  "regex",
  "sui-json-rpc-types",
  "sui-move",

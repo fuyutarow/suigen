@@ -1,4 +1,7 @@
+use once_cell::sync::Lazy;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Mutex;
 
 use crate::model_builder::{TypeOriginTable, VersionTable};
 use anyhow::Result;
@@ -30,6 +33,10 @@ const JS_STRICTLY_RESERVED_WORDS: [&str; 37] = [
     "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void",
     "while", "with", "yield"
 ];
+
+// Add this after the const declarations
+static ADDED_TYPE_IMPORTS: Lazy<Mutex<RefCell<std::collections::HashSet<String>>>> =
+    Lazy::new(|| Mutex::new(RefCell::new(std::collections::HashSet::new())));
 
 /// Returns module name that's used in import paths (converts kebab case as that's idiomatic in TS).
 /// In TypeScript variable/module names, hyphens are not allowed, so we convert to underscores.
@@ -79,6 +86,12 @@ impl FrameworkImportCtx {
     }
 
     fn import(&self, module: &str, name: &str) -> js::Import {
+        js::import(format!("{}/{}", self.framework_rel_path, module), name)
+    }
+
+    fn type_import(&self, module: &str, name: &str) -> js::Import {
+        // Since we can't directly use TypedImport in place of js::Import,
+        // we'll still return a normal import but we need to modify the generator later
         js::import(format!("{}/{}", self.framework_rel_path, module), name)
     }
 }
@@ -824,21 +837,20 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> FunctionsGen<'a, 'model, HAS_SOUR
     /// Generates a TS type for a function's parameter type. Used in the `<..>Args` interface.
     fn param_type_to_field_type(&self, ty: &Type) -> js::Tokens {
         let generic_arg = &self.framework.import("util", "GenericArg");
-        let transaction_argument = &js::import("@mysten/sui/transactions", "TransactionArgument");
-        let transaction_object_input =
-            &js::import("@mysten/sui/transactions", "TransactionObjectInput");
+        // We don't need imports here as we've added type-only imports at the top
+        // of the generated file
 
         match ty {
             Type::U8 | Type::U16 | Type::U32 => {
-                quote!(number | $transaction_argument)
+                quote!(number | TransactionArgument)
             }
             Type::U64 | Type::U128 | Type::U256 => {
-                quote!(bigint | $transaction_argument)
+                quote!(bigint | TransactionArgument)
             }
-            Type::Bool => quote!(boolean | $transaction_argument),
-            Type::Address => quote!(string | $transaction_argument),
+            Type::Bool => quote!(boolean | TransactionArgument),
+            Type::Address => quote!(string | TransactionArgument),
             Type::Vector(ty) => {
-                quote!(Array<$(self.param_type_to_field_type(ty))> | $transaction_argument)
+                quote!(Array<$(self.param_type_to_field_type(ty))> | TransactionArgument)
             }
             Type::Datatype(id_tys) => {
                 let (id, ts) = &**id_tys;
@@ -846,15 +858,15 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> FunctionsGen<'a, 'model, HAS_SOUR
                 match (pid, mid.as_str(), sid.as_str()) {
                     (AccountAddress::ONE, "string", "String")
                     | (AccountAddress::ONE, "ascii", "String") => {
-                        quote!(string | $transaction_argument)
+                        quote!(string | TransactionArgument)
                     }
                     (AccountAddress::TWO, "object", "ID") => {
-                        quote!(string | $transaction_argument)
+                        quote!(string | TransactionArgument)
                     }
                     (AccountAddress::ONE, "option", "Option") => {
-                        quote!(($(self.param_type_to_field_type(&ts[0])) | $transaction_argument | null))
+                        quote!(($(self.param_type_to_field_type(&ts[0])) | TransactionArgument | null))
                     }
-                    _ => quote!($transaction_object_input),
+                    _ => quote!(TransactionObjectInput),
                 }
             }
             Type::Reference(_, ty) => self.param_type_to_field_type(ty),
@@ -966,7 +978,27 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> FunctionsGen<'a, 'model, HAS_SOUR
     /// Generates a function binding for a function.
     pub fn gen_fun_binding(&mut self, tokens: &mut Tokens<JavaScript>) -> Result<()> {
         let transaction = &js::import("@mysten/sui/transactions", "Transaction");
+        let _transaction_argument = &js::import("@mysten/sui/transactions", "TransactionArgument")
+            .with_alias("_TransactionArgument");
+        let _transaction_object_input =
+            &js::import("@mysten/sui/transactions", "TransactionObjectInput")
+                .with_alias("_TransactionObjectInput");
         let published_at = &js::import("..", "PUBLISHED_AT");
+
+        // Generate a unique key for this module
+        let module_name = self.func.module().name().to_string();
+
+        // Add type-only imports only once per module
+        let added_imports = ADDED_TYPE_IMPORTS.lock().unwrap();
+        if !added_imports.borrow().contains(&module_name) {
+            tokens.append("// Type-only imports\n");
+            tokens.append("import type { PhantomReified, PhantomToTypeStr, PhantomTypeArgument, Reified, StructClass, ToField, ToPhantomTypeArgument, ToTypeStr } from \"../../_framework/reified\";\n");
+            tokens.append("import type { FieldsWithTypes } from \"../../_framework/util\";\n");
+            tokens.append("import type { SuiClient, SuiObjectData, SuiParsedData } from \"@mysten/sui/client\";\n");
+            tokens.append("import type { TransactionArgument, TransactionObjectInput } from \"@mysten/sui/transactions\";\n");
+            tokens.line();
+            added_imports.borrow_mut().insert(module_name);
+        }
 
         let param_field_names = self.params_to_field_names(true);
 
@@ -1093,12 +1125,12 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> StructsGen<'a, 'model, HAS_SOURCE
         wrap_phantom_type_parameter: Option<js::Tokens>,
         is_top_level: bool,
     ) -> js::Tokens {
-        let to_field = &self.framework.import("reified", "ToField");
+        let to_field = &self.framework.type_import("reified", "ToField");
         let to_phantom = &self
             .framework
-            .import("reified", "ToTypeStr")
+            .type_import("reified", "ToTypeStr")
             .with_alias("ToPhantom");
-        let vector = &self.framework.import("vector", "Vector");
+        let vector = &self.framework.type_import("vector", "Vector");
 
         let field_type = match ty {
             Type::U8 => quote!($[str](u8)),
@@ -1491,18 +1523,20 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> StructsGen<'a, 'model, HAS_SOURCE
 
     /// Generates the struct class for a struct.
     pub fn gen_struct_class(&mut self, tokens: &mut js::Tokens) {
-        let fields_with_types = &self.framework.import("util", "FieldsWithTypes");
+        let fields_with_types = &self.framework.type_import("util", "FieldsWithTypes");
         let compose_sui_type = &self.framework.import("util", "composeSuiType");
-        let struct_class = &self.framework.import("reified", "StructClass");
+        let struct_class = &self.framework.type_import("reified", "StructClass");
         let field_to_json = &self.framework.import("reified", "fieldToJSON");
-        let type_argument = &self.framework.import("reified", "TypeArgument");
-        let phantom_type_argument = &self.framework.import("reified", "PhantomTypeArgument");
-        let reified = &self.framework.import("reified", "Reified");
-        let phantom_reified = &self.framework.import("reified", "PhantomReified");
-        let to_type_argument = &self.framework.import("reified", "ToTypeArgument");
-        let to_phantom_type_argument = &self.framework.import("reified", "ToPhantomTypeArgument");
-        let to_type_str = &self.framework.import("reified", "ToTypeStr");
-        let phantom_to_type_str = &self.framework.import("reified", "PhantomToTypeStr");
+        let type_argument = &self.framework.type_import("reified", "TypeArgument");
+        let phantom_type_argument = &self.framework.type_import("reified", "PhantomTypeArgument");
+        let reified = &self.framework.type_import("reified", "Reified");
+        let phantom_reified = &self.framework.type_import("reified", "PhantomReified");
+        let to_type_argument = &self.framework.type_import("reified", "ToTypeArgument");
+        let to_phantom_type_argument = &self
+            .framework
+            .type_import("reified", "ToPhantomTypeArgument");
+        let to_type_str = &self.framework.type_import("reified", "ToTypeStr");
+        let phantom_to_type_str = &self.framework.type_import("reified", "PhantomToTypeStr");
         let to_bcs = &self.framework.import("reified", "toBcs");
         let extract_type = &self.framework.import("reified", "extractType");
         let parse_type_name = &self.framework.import("util", "parseTypeName");
@@ -1513,9 +1547,22 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> StructsGen<'a, 'model, HAS_SOURCE
         let assert_fields_with_types_args_match = &self
             .framework
             .import("reified", "assertFieldsWithTypesArgsMatch");
-        let sui_parsed_data = &js::import("@mysten/sui/client", "SuiParsedData");
-        let sui_object_data = &js::import("@mysten/sui/client", "SuiObjectData");
-        let sui_client = &js::import("@mysten/sui/client", "SuiClient");
+
+        // Generate a unique key for this module
+        let module_name = self.strct.module().name().to_string();
+
+        // Add type-only imports only once per module
+        let added_imports = ADDED_TYPE_IMPORTS.lock().unwrap();
+        if !added_imports.borrow().contains(&module_name) {
+            tokens.append("// Type-only imports\n");
+            tokens.append("import type { PhantomReified, PhantomToTypeStr, PhantomTypeArgument, Reified, StructClass, ToField, ToPhantomTypeArgument, ToTypeStr } from \"../../_framework/reified\";\n");
+            tokens.append("import type { FieldsWithTypes } from \"../../_framework/util\";\n");
+            tokens.append("import type { SuiClient, SuiObjectData, SuiParsedData } from \"@mysten/sui/client\";\n");
+            tokens.append("import type { TransactionArgument, TransactionObjectInput } from \"@mysten/sui/transactions\";\n");
+            tokens.line();
+            added_imports.borrow_mut().insert(module_name);
+        }
+
         let bcs = &js::import("@mysten/sui/bcs", "bcs");
         let bcs_type = &js::import("@mysten/sui/bcs", "BcsType");
         let from_b64 = &js::import("@mysten/sui/utils", "fromB64");
@@ -1802,7 +1849,7 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> StructsGen<'a, 'model, HAS_SOURCE
                                 })
                                 json,
                             ),
-                        fromSuiParsedData: (content: $sui_parsed_data) =>
+                        fromSuiParsedData: (content: SuiParsedData) =>
                             $(&struct_name).fromSuiParsedData(
                                 $(match type_params.len() {
                                     0 => (),
@@ -1811,7 +1858,7 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> StructsGen<'a, 'model, HAS_SOURCE
                                 })
                                 content,
                             ),
-                        fromSuiObjectData: (content: $sui_object_data) =>
+                        fromSuiObjectData: (content: SuiObjectData) =>
                             $(&struct_name).fromSuiObjectData(
                                 $(match type_params.len() {
                                     0 => (),
@@ -1820,7 +1867,7 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> StructsGen<'a, 'model, HAS_SOURCE
                                 })
                                 content,
                             ),
-                        fetch: async (client: $sui_client, id: string) => $(&struct_name).fetch(
+                        fetch: async (client: SuiClient, id: string) => $(&struct_name).fetch(
                             client,
                             $(match type_params.len() {
                                 0 => (),
@@ -2099,7 +2146,7 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> StructsGen<'a, 'model, HAS_SOURCE
                 }$['\n']
 
                 static fromSuiParsedData$(params_toks_for_reified)(
-                    $type_args_param_if_any content: $sui_parsed_data
+                    $type_args_param_if_any content: SuiParsedData
                 ): $(&struct_name)$(params_toks_for_to_type_argument) {
                     if (content.dataType !== "moveObject") {
                         throw new Error("not an object");
@@ -2120,7 +2167,7 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> StructsGen<'a, 'model, HAS_SOURCE
                 }$['\n']
 
                 static fromSuiObjectData$(params_toks_for_reified)(
-                    $type_args_param_if_any data: $sui_object_data
+                    $type_args_param_if_any data: SuiObjectData
                 ): $(&struct_name)$(params_toks_for_to_type_argument) {
                     if (data.bcs) {
                         if (data.bcs.dataType !== "moveObject" || !is$(&struct_name)(data.bcs.type)) {
@@ -2190,7 +2237,7 @@ impl<'a, 'model, const HAS_SOURCE: SourceKind> StructsGen<'a, 'model, HAS_SOURCE
                 }$['\n']
 
                 static async fetch$(params_toks_for_reified)(
-                    client: $sui_client, $type_args_param_if_any id: string
+                    client: SuiClient, $type_args_param_if_any id: string
                 ): Promise<$(&struct_name)$(params_toks_for_to_type_argument)> {
                     const res = await client.getObject({
                         id,
