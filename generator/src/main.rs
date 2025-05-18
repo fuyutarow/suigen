@@ -11,24 +11,24 @@ use move_model_2::{compiled_model, model, source_model};
 use move_package::source_package::parsed_manifest::PackageName;
 use move_symbol_pool::Symbol;
 use std::io::Write;
-use sui_client_gen::framework_sources;
-use sui_client_gen::gen::{
-    gen_init_loader_ts, gen_package_init_ts, module_import_name, package_import_name,
-};
-use sui_client_gen::gen::{FrameworkImportCtx, FunctionsGen, StructClassImportCtx, StructsGen};
-use sui_client_gen::manifest::{parse_gen_manifest_from_file, GenManifest, Package};
-use sui_client_gen::model_builder::{
-    build_models, OnChainModelResult, SourceModelResult, TypeOriginTable, VersionTable,
-};
-use sui_client_gen::package_cache::PackageCache;
 use sui_move_build::SuiPackageHooks;
 use sui_sdk::SuiClientBuilder;
+use suigen::framework_sources;
+use suigen::gen::{
+    gen_init_loader_ts, gen_package_init_ts, module_import_name, package_import_name,
+};
+use suigen::gen::{FrameworkImportCtx, FunctionsGen, StructClassImportCtx, StructsGen};
+use suigen::manifest::{parse_gen_manifest_from_file, GenManifest, Package};
+use suigen::model_builder::{
+    build_models, OnChainModelResult, SourceModelResult, TypeOriginTable, VersionTable,
+};
+use suigen::package_cache::PackageCache;
 
 const DEFAULT_RPC: &str = "https://fullnode.mainnet.sui.io:443";
 
 #[derive(Parser)]
 #[clap(
-    name = "sui-client-gen",
+    name = "suigen",
     version,
     about = "Generate TS SDKs for Sui Move smart contracts."
 )]
