@@ -191,6 +191,53 @@ async fn main() -> Result<()> {
         &out_root.join(".eslintrc.json"),
     )?;
 
+    // Generate a top-level barrel file that re-exports all packages
+    gen_top_level_barrel_file(
+        &out_root,
+        &source_top_level_addr_map,
+        &on_chain_top_level_addr_map,
+    )?;
+
+    Ok(())
+}
+
+/// Generates a top-level barrel file (index.ts) that re-exports all packages
+fn gen_top_level_barrel_file(
+    out_root: &Path,
+    source_top_level_pkg_names: &BTreeMap<AccountAddress, Symbol>,
+    on_chain_top_level_pkg_names: &BTreeMap<AccountAddress, Symbol>,
+) -> Result<()> {
+    let mut barrel_content = String::new();
+
+    // Add exports for source packages
+    for (_, pkg_name) in source_top_level_pkg_names.iter() {
+        let pkg_import_name = package_import_name(*pkg_name);
+        barrel_content.push_str(&format!(
+            "export * as {} from './{}';\n",
+            pkg_import_name, pkg_import_name
+        ));
+    }
+
+    // Add exports for on-chain packages
+    for (_, pkg_name) in on_chain_top_level_pkg_names.iter() {
+        let pkg_import_name = package_import_name(*pkg_name);
+        // Skip if already added (in case same package name appears in both source and on-chain)
+        if !source_top_level_pkg_names
+            .values()
+            .any(|name| package_import_name(*name) == pkg_import_name)
+        {
+            barrel_content.push_str(&format!(
+                "export * as {} from './{}';\n",
+                pkg_import_name, pkg_import_name
+            ));
+        }
+    }
+
+    // Write the barrel file
+    if !barrel_content.is_empty() {
+        write_str_to_file(&barrel_content, &out_root.join("index.ts"))?;
+    }
+
     Ok(())
 }
 
