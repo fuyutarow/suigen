@@ -6937,35 +6937,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "734676eb262c623cec13c3155096e08d1f8f29adce39ba17948b18dad1e54142"
 
 [[package]]
-name = "sui-client-gen"
-version = "0.3.2"
-dependencies = [
- "anyhow",
- "clap",
- "codespan-reporting",
- "colored",
- "convert_case 0.6.0",
- "futures",
- "genco",
- "move-binary-format",
- "move-bytecode-utils",
- "move-command-line-common",
- "move-compiler",
- "move-core-types",
- "move-model-2",
- "move-package",
- "move-symbol-pool",
- "regex",
- "sui-json-rpc-types",
- "sui-move",
- "sui-move-build",
- "sui-sdk",
- "tempfile",
- "tokio",
- "toml",
-]
-
-[[package]]
 name = "sui-config"
 version = "0.0.0"
 source = "git+https://github.com/MystenLabs/sui/?rev=mainnet-v1.46.3#6561c0d17519bf4ce600679709e86ab6c76dd2a3"
@@ -7563,6 +7534,35 @@ dependencies = [
  "move-vm-config",
  "sui-protocol-config",
  "sui-types",
+]
+
+[[package]]
+name = "suigen"
+version = "0.3.2"
+dependencies = [
+ "anyhow",
+ "clap",
+ "codespan-reporting",
+ "colored",
+ "convert_case 0.6.0",
+ "futures",
+ "genco",
+ "move-binary-format",
+ "move-bytecode-utils",
+ "move-command-line-common",
+ "move-compiler",
+ "move-core-types",
+ "move-model-2",
+ "move-package",
+ "move-symbol-pool",
+ "regex",
+ "sui-json-rpc-types",
+ "sui-move",
+ "sui-move-build",
+ "sui-sdk",
+ "tempfile",
+ "tokio",
+ "toml",
 ]
 
 [[package]]
