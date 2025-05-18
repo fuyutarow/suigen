@@ -286,11 +286,39 @@ fn write_tokens_to_file(tokens: &Tokens<JavaScript>, path: &Path) -> Result<()> 
         return Ok(());
     }
 
+    // Write to a string first so we can post-process it
+    let mut buffer = Vec::new();
+    {
+        let mut writer = fmt::IoWriter::new(&mut buffer);
+        let fmt = fmt::Config::from_lang::<JavaScript>();
+        let config = js::Config::default();
+        tokens.format_file(&mut writer.as_formatter(&fmt), &config)?;
+    }
+
+    // Convert to string for processing
+    let content = String::from_utf8(buffer)?;
+
+    // Process imports with "type:" prefix for type-only imports
+    let processed_content = content
+        .lines()
+        .map(|line| {
+            if line.trim().starts_with("import {") && line.contains("from \"type:") {
+                // Convert the "import {...} from "type:..." to import type {...} from "..."
+                line.replace("import {", "import type {")
+                    .replace("from \"type:", "from \"")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    // Write processed content to file
     let file = std::fs::File::create(path)?;
-    let mut w = fmt::IoWriter::new(file);
-    let fmt = fmt::Config::from_lang::<JavaScript>();
-    let config = js::Config::default();
-    tokens.format_file(&mut w.as_formatter(&fmt), &config)?;
+    let mut writer = std::io::BufWriter::new(file);
+    use std::io::Write;
+    writer.write_all(processed_content.as_bytes())?;
+
     Ok(())
 }
 

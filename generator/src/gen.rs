@@ -90,9 +90,10 @@ impl FrameworkImportCtx {
     }
 
     fn type_import(&self, module: &str, name: &str) -> js::Import {
-        // Since we can't directly use TypedImport in place of js::Import,
-        // we'll still return a normal import but we need to modify the generator later
-        js::import(format!("{}/{}", self.framework_rel_path, module), name)
+        // We need to return a type-only import for TypeScript
+        // Add a special "type:" prefix to indicate this is a type import
+        // This will be handled specially in the code generation
+        js::import(format!("type:{}/{}", self.framework_rel_path, module), name)
     }
 }
 
