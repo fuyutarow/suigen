@@ -161,7 +161,7 @@ impl<'a> StructClassImportCtx<'a> {
         } else if same_package {
             // if the struct is defined in a different module in the same package, we use
             // the short version of the import path
-            Some(format!("../{}/structs", module_name))
+            Some(format!("../{}/structs", module.name().to_string()))
         } else {
             let strct_is_top_level = self
                 .top_level_pkg_names
@@ -175,7 +175,11 @@ impl<'a> StructClassImportCtx<'a> {
                         .unwrap(),
                 );
 
-                Some(format!("../../{}/{}/structs", strct_pkg_name, module_name))
+                Some(format!(
+                    "../../{}/{}/structs",
+                    strct_pkg_name,
+                    module.name().to_string()
+                ))
             } else if self.is_top_level {
                 let dep_dir = if HAS_SOURCE == WITH_SOURCE {
                     "source"
@@ -187,7 +191,7 @@ impl<'a> StructClassImportCtx<'a> {
                     "../../_dependencies/{}/{}/{}/structs",
                     dep_dir,
                     module.package().address().to_hex_literal(),
-                    module_name
+                    module.name().to_string()
                 ))
             } else if strct_is_top_level {
                 let strct_pkg_name = package_import_name(
@@ -199,13 +203,14 @@ impl<'a> StructClassImportCtx<'a> {
 
                 Some(format!(
                     "../../../../{}/{}/structs",
-                    strct_pkg_name, module_name
+                    strct_pkg_name,
+                    module.name().to_string()
                 ))
             } else {
                 Some(format!(
                     "../../{}/{}/structs",
                     module.package().address().to_hex_literal(),
-                    module_name
+                    module.name().to_string()
                 ))
             }
         }
@@ -361,7 +366,7 @@ pub fn gen_package_init_ts<const HAS_SOURCE: SourceKind>(
                     }
 
                     let module_import = &js::import(
-                        format!("./{}/structs", module_import_name(module.name())),
+                        format!("./{}/structs", module_name),
                         imported_name,
                     )
                     .into_wildcard();

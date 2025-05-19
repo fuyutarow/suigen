@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use clap::*;
 use colored::*;
+use convert_case::{Case, Casing};
 use genco::fmt;
 use genco::prelude::*;
 use move_core_types::account_address::AccountAddress;
@@ -222,9 +223,22 @@ fn gen_top_level_barrel_file(
         }
     };
 
+    // Helper function to generate PascalCase path for imports
+    let get_pascal_case_path = |pkg_name: Symbol| {
+        let name = pkg_name.to_string();
+        // If the name contains underscores, it's likely in snake_case format
+        if name.contains('_') {
+            name.from_case(Case::Snake).to_case(Case::Pascal)
+        } else {
+            // Already in PascalCase or ensure it is
+            name.from_case(Case::Camel).to_case(Case::Pascal)
+        }
+    };
+
     // Add exports for source packages
     for (_, pkg_name) in source_top_level_pkg_names.iter() {
         let safe_import_name = get_safe_import_name(*pkg_name);
+        let pascal_case_path = get_pascal_case_path(*pkg_name);
 
         // Skip if we've already exported this name (avoids duplicates)
         if !exported_names.insert(safe_import_name.clone()) {
@@ -233,13 +247,14 @@ fn gen_top_level_barrel_file(
 
         barrel_content.push_str(&format!(
             "export * as {} from './{}';\n",
-            safe_import_name, safe_import_name
+            safe_import_name, pascal_case_path
         ));
     }
 
     // Add exports for on-chain packages
     for (_, pkg_name) in on_chain_top_level_pkg_names.iter() {
         let safe_import_name = get_safe_import_name(*pkg_name);
+        let pascal_case_path = get_pascal_case_path(*pkg_name);
 
         // Skip if we've already exported this name (avoids duplicates)
         if !exported_names.insert(safe_import_name.clone()) {
@@ -248,7 +263,7 @@ fn gen_top_level_barrel_file(
 
         barrel_content.push_str(&format!(
             "export * as {} from './{}';\n",
-            safe_import_name, safe_import_name
+            safe_import_name, pascal_case_path
         ));
     }
 
@@ -401,8 +416,29 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
             }
         };
 
+        // Convert package name to PascalCase for directory name
+        let pascal_case_pkg_name = match top_level_pkg_names.get(pkg_id) {
+            Some(pkg_name) => {
+                let name = pkg_name.to_string();
+                // If the name contains underscores, it's likely in snake_case format
+                if name.contains('_') {
+                    name.from_case(Case::Snake).to_case(Case::Pascal)
+                } else {
+                    // Already in PascalCase or ensure it is
+                    name.from_case(Case::Camel).to_case(Case::Pascal)
+                }
+            }
+            None => {
+                let dep_dir = match is_source {
+                    true => "source",
+                    false => "onchain",
+                };
+                format!("{}/{}", dep_dir, pkg_id.to_hex_literal())
+            }
+        };
+
         let package_path = out_root.join(match top_level_pkg_names.get(pkg_id) {
-            Some(_) => PathBuf::from(safe_pkg_import_name),
+            Some(_) => PathBuf::from(pascal_case_pkg_name),
             None => PathBuf::from("_dependencies")
                 .join(match is_source {
                     true => "source",
@@ -417,7 +453,8 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
         let mut validated_modules = Vec::new();
         for module in pkg.modules() {
             let module_name = module_import_name(module.name());
-            let module_path = package_path.join(&module_name);
+            let original_module_name = module.name().to_string();
+            let module_path = package_path.join(&original_module_name);
 
             // Create the module directory
             std::fs::create_dir_all(&module_path)?;
@@ -428,7 +465,7 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
             let has_structs = module.structs().next().is_some();
 
             if has_functions || has_structs {
-                validated_modules.push((module, module_name));
+                validated_modules.push((module, module_name, original_module_name));
             }
         }
 
@@ -460,18 +497,21 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
         // Add module exports with namespaces, but only for modules with files
         if !validated_modules.is_empty() {
             index_content.push_str("// Module exports\n");
-            for (_, module_name) in &validated_modules {
+            for (_, module_name, original_module_name) in &validated_modules {
+                // Convert module name to camelCase for export name
+                let camel_case_module_name = module_name.clone();
+
                 // Check if module name is a reserved word and add suffix if needed
                 let safe_module_name =
-                    if suigen::gen::JS_RESERVED_WORDS.contains(&module_name.as_str()) {
-                        format!("{}_mod", module_name)
+                    if suigen::gen::JS_RESERVED_WORDS.contains(&camel_case_module_name.as_str()) {
+                        format!("{}_mod", camel_case_module_name)
                     } else {
-                        module_name.clone()
+                        camel_case_module_name
                     };
 
                 index_content.push_str(&format!(
                     "export * as {} from './{}';\n",
-                    safe_module_name, module_name
+                    safe_module_name, original_module_name
                 ));
             }
         }
@@ -483,8 +523,8 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
         write_tokens_to_file(&tokens, &package_path.join("init.ts"))?;
 
         // generate modules
-        for (module, module_name) in validated_modules {
-            let module_path = package_path.join(&module_name);
+        for (module, module_name, original_module_name) in validated_modules {
+            let module_path = package_path.join(&original_module_name);
 
             // generate <module>/functions.ts
             if is_top_level {
@@ -576,8 +616,12 @@ fn gen_module_barrel_file(module_path: &Path) -> Result<()> {
     // Generate the barrel file content with re-exports
     let mut barrel_content = String::new();
     for file in export_files {
-        let camel_case_file = module_import_name(Symbol::from(file.as_str()));
-        barrel_content.push_str(&format!("export * from './{}';\n", camel_case_file));
+        // Convert the export name to camelCase but keep the import path as is
+        let camel_case_name = module_import_name(Symbol::from(file.as_str()));
+        barrel_content.push_str(&format!(
+            "export * as {} from './{}';\n",
+            camel_case_name, file
+        ));
     }
 
     // Write the barrel file
