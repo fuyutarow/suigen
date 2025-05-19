@@ -616,12 +616,17 @@ fn gen_module_barrel_file(module_path: &Path) -> Result<()> {
     // Generate the barrel file content with re-exports
     let mut barrel_content = String::new();
     for file in export_files {
-        // Convert the export name to camelCase but keep the import path as is
-        let camel_case_name = module_import_name(Symbol::from(file.as_str()));
-        barrel_content.push_str(&format!(
-            "export * as {} from './{}';\n",
-            camel_case_name, file
-        ));
+        // Use direct exports for 'structs' and 'functions', namespace exports for others
+        if file == "structs" || file == "functions" {
+            barrel_content.push_str(&format!("export * from './{}';\n", file));
+        } else {
+            // Convert the export name to camelCase but keep the import path as is
+            let camel_case_name = module_import_name(Symbol::from(file.as_str()));
+            barrel_content.push_str(&format!(
+                "export * as {} from './{}';\n",
+                camel_case_name, file
+            ));
+        }
     }
 
     // Write the barrel file
