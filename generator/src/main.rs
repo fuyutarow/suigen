@@ -212,6 +212,7 @@ fn gen_top_level_barrel_file(
 
     // Helper function to generate a safe import name that handles JavaScript reserved words
     let get_safe_import_name = |pkg_name: Symbol| {
+        // Use package_import_name for package-level exports
         let import_name = package_import_name(pkg_name);
         // Check if the import name is a JavaScript reserved word
         if suigen::gen::JS_RESERVED_WORDS.contains(&import_name.as_str()) {
@@ -251,9 +252,11 @@ fn gen_top_level_barrel_file(
         ));
     }
 
-    // Write the barrel file
+    // Write the barrel file with package exports header
     if !barrel_content.is_empty() {
-        write_str_to_file(&barrel_content, &out_root.join("index.ts"))?;
+        // Add a comment indicating these are package exports
+        let barrel_content_with_header = format!("// Package exports\n{}", barrel_content);
+        write_str_to_file(&barrel_content_with_header, &out_root.join("index.ts"))?;
     }
 
     Ok(())
@@ -573,7 +576,8 @@ fn gen_module_barrel_file(module_path: &Path) -> Result<()> {
     // Generate the barrel file content with re-exports
     let mut barrel_content = String::new();
     for file in export_files {
-        barrel_content.push_str(&format!("export * from './{}';\n", file));
+        let camel_case_file = module_import_name(Symbol::from(file.as_str()));
+        barrel_content.push_str(&format!("export * from './{}';\n", camel_case_file));
     }
 
     // Write the barrel file
