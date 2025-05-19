@@ -417,7 +417,8 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
         let mut validated_modules = Vec::new();
         for module in pkg.modules() {
             let module_name = module_import_name(module.name());
-            let module_path = package_path.join(&module_name);
+            let original_module_name = module.name().to_string();
+            let module_path = package_path.join(&original_module_name);
 
             // Create the module directory
             std::fs::create_dir_all(&module_path)?;
@@ -428,7 +429,7 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
             let has_structs = module.structs().next().is_some();
 
             if has_functions || has_structs {
-                validated_modules.push((module, module_name));
+                validated_modules.push((module, module_name, original_module_name));
             }
         }
 
@@ -460,18 +461,21 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
         // Add module exports with namespaces, but only for modules with files
         if !validated_modules.is_empty() {
             index_content.push_str("// Module exports\n");
-            for (_, module_name) in &validated_modules {
+            for (_, module_name, original_module_name) in &validated_modules {
+                // Convert module name to camelCase for export name
+                let camel_case_module_name = module_name.clone();
+
                 // Check if module name is a reserved word and add suffix if needed
                 let safe_module_name =
-                    if suigen::gen::JS_RESERVED_WORDS.contains(&module_name.as_str()) {
-                        format!("{}_mod", module_name)
+                    if suigen::gen::JS_RESERVED_WORDS.contains(&camel_case_module_name.as_str()) {
+                        format!("{}_mod", camel_case_module_name)
                     } else {
-                        module_name.clone()
+                        camel_case_module_name
                     };
 
                 index_content.push_str(&format!(
                     "export * as {} from './{}';\n",
-                    safe_module_name, module_name
+                    safe_module_name, original_module_name
                 ));
             }
         }
@@ -483,8 +487,8 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
         write_tokens_to_file(&tokens, &package_path.join("init.ts"))?;
 
         // generate modules
-        for (module, module_name) in validated_modules {
-            let module_path = package_path.join(&module_name);
+        for (module, module_name, original_module_name) in validated_modules {
+            let module_path = package_path.join(&original_module_name);
 
             // generate <module>/functions.ts
             if is_top_level {
@@ -576,8 +580,12 @@ fn gen_module_barrel_file(module_path: &Path) -> Result<()> {
     // Generate the barrel file content with re-exports
     let mut barrel_content = String::new();
     for file in export_files {
-        let camel_case_file = module_import_name(Symbol::from(file.as_str()));
-        barrel_content.push_str(&format!("export * from './{}';\n", camel_case_file));
+        // Convert the export name to camelCase but keep the import path as is
+        let camel_case_name = module_import_name(Symbol::from(file.as_str()));
+        barrel_content.push_str(&format!(
+            "export * as {} from './{}';\n",
+            camel_case_name, file
+        ));
     }
 
     // Write the barrel file
