@@ -137,26 +137,6 @@ async fn main() -> Result<()> {
         out_root.join("_framework").join("vector.ts").as_ref(),
     )?;
 
-    // Also create the framework files in the examples directory for development/testing
-    let examples_dir = PathBuf::from("examples/src/suigen/_framework");
-    std::fs::create_dir_all(&examples_dir)?;
-    write_str_to_file(
-        framework_sources::LOADER,
-        examples_dir.join("loader.ts").as_ref(),
-    )?;
-    write_str_to_file(
-        framework_sources::UTIL,
-        examples_dir.join("util.ts").as_ref(),
-    )?;
-    write_str_to_file(
-        framework_sources::REIFIED,
-        examples_dir.join("reified.ts").as_ref(),
-    )?;
-    write_str_to_file(
-        framework_sources::VECTOR,
-        examples_dir.join("vector.ts").as_ref(),
-    )?;
-
     write_tokens_to_file(
         &gen_init_loader_ts(
             match source_pkgs.is_empty() {
@@ -175,27 +155,6 @@ async fn main() -> Result<()> {
             },
         ),
         out_root.join("_framework").join("init-loader.ts").as_ref(),
-    )?;
-
-    // Also write init-loader.ts to examples directory
-    write_tokens_to_file(
-        &gen_init_loader_ts(
-            match source_pkgs.is_empty() {
-                false => Some((
-                    source_pkgs.keys().copied().collect::<Vec<_>>(),
-                    &source_top_level_addr_map,
-                )),
-                true => None,
-            },
-            match on_chain_pkgs.is_empty() {
-                false => Some((
-                    on_chain_pkgs.keys().copied().collect::<Vec<_>>(),
-                    &on_chain_top_level_addr_map,
-                )),
-                true => None,
-            },
-        ),
-        examples_dir.join("init-loader.ts").as_ref(),
     )?;
 
     if let Some(m) = &source_model {
@@ -243,6 +202,31 @@ async fn main() -> Result<()> {
         &source_top_level_addr_map,
         &on_chain_top_level_addr_map,
     )?;
+
+    // Create a combined index.ts that exports all modules
+    create_index_file(&out_root)?;
+
+    Ok(())
+}
+
+/// Creates a combined index.ts file that exports all modules
+fn create_index_file(dir: &Path) -> Result<()> {
+    let index_path = dir.join("index.ts");
+    let mut index_content = String::new();
+
+    // Look for module directories (not _framework or _dependencies)
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        if path.is_dir() && !name.starts_with('_') {
+            index_content.push_str(&format!("export * as {} from './{}';\n", name, name));
+        }
+    }
+
+    // Write the combined index.ts
+    std::fs::write(index_path, index_content)?;
 
     Ok(())
 }
@@ -412,10 +396,16 @@ fn calculate_framework_path(path_str: &str) -> String {
 /// Fixes import paths in generated TypeScript files
 fn fix_import_paths(content: &str, framework_path: &str) -> String {
     let mut result = String::new();
+    let mut has_sui_client_types = false;
 
     // Process line by line
     for line in content.lines() {
         let trimmed = line.trim();
+
+        // Skip SuiClient imports if we've already added one
+        if trimmed.contains("SuiClient") && trimmed.contains("import") && has_sui_client_types {
+            continue;
+        }
 
         // Handle import statements
         if trimmed.starts_with("import ") {
@@ -439,7 +429,7 @@ fn fix_import_paths(content: &str, framework_path: &str) -> String {
                 result.push_str(&fixed_line);
                 result.push('\n');
             }
-            // Handle regular framework imports
+            // Handle regular framework imports - any path pattern
             else if trimmed.contains("_framework/") {
                 // Replace any path pattern to _framework with the correct path
                 let fixed_line =
@@ -447,6 +437,20 @@ fn fix_import_paths(content: &str, framework_path: &str) -> String {
                         .unwrap()
                         .replace(trimmed, &format!("from \"{}/$3\"", framework_path));
                 result.push_str(&fixed_line);
+                result.push('\n');
+
+                // Check if the file needs SuiClient types
+                if content.contains("SuiClient")
+                    || content.contains("SuiObjectData")
+                    || content.contains("SuiParsedData")
+                {
+                    has_sui_client_types = true;
+                }
+            }
+            // Check for direct SuiClient import
+            else if trimmed.contains("SuiClient") && trimmed.contains("@mysten/sui/client") {
+                has_sui_client_types = true;
+                result.push_str(line);
                 result.push('\n');
             } else {
                 // Pass through other imports
@@ -458,6 +462,14 @@ fn fix_import_paths(content: &str, framework_path: &str) -> String {
             result.push_str(line);
             result.push('\n');
         }
+    }
+
+    // Add SuiClient types import if needed and not already imported
+    if has_sui_client_types && !result.contains("SuiClient") {
+        result = format!(
+            "import {{ SuiClient, SuiObjectData, SuiParsedData }} from \"@mysten/sui/client\";\n{}",
+            result
+        );
     }
 
     result

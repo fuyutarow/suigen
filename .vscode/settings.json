@@ -1,20 +1,18 @@
 {
-  "editor.formatOnSave": true,
-  "eslint.format.enable": true,
-  "eslint.validate": [
-    "typescript"
-  ],
-  "[typescript]": {
-    "editor.defaultFormatter": "dbaeumer.vscode-eslint",
-    "editor.tabSize": 2
-  },
-  "[typescriptreact]": {
-    "editor.defaultFormatter": "dbaeumer.vscode-eslint",
-    "editor.tabSize": 2
-  },
-  "[javascript]": {
-    "editor.defaultFormatter": "dbaeumer.vscode-eslint",
-    "editor.tabSize": 2
-  },
-  "rust-analyzer.checkOnSave.command": "clippy"
+	"editor.formatOnSave": true,
+	"eslint.format.enable": true,
+	"eslint.validate": ["typescript"],
+	"[typescript]": {
+		"editor.defaultFormatter": "dbaeumer.vscode-eslint",
+		"editor.tabSize": 2
+	},
+	"[typescriptreact]": {
+		"editor.defaultFormatter": "dbaeumer.vscode-eslint",
+		"editor.tabSize": 2
+	},
+	"[javascript]": {
+		"editor.defaultFormatter": "dbaeumer.vscode-eslint",
+		"editor.tabSize": 2
+	},
+	"rust-analyzer.checkOnSave.command": "clippy"
 }
