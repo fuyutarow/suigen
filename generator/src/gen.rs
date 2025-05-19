@@ -31,24 +31,25 @@ const JS_STRICTLY_RESERVED_WORDS: [&str; 37] = [
     "while", "with", "yield"
 ];
 
-/// Returns module name that's used in import paths (converts kebab case as that's idiomatic in TS).
-/// In TypeScript variable/module names, hyphens are not allowed, so we convert to underscores.
+/// Returns module name that's used in import paths (converts to camelCase for JavaScript naming conventions).
 pub fn module_import_name(module: Symbol) -> String {
     module
         .to_string()
         .from_case(Case::Snake)
-        .to_case(Case::Kebab)
-        .replace("-", "_")
+        .to_case(Case::Camel)
 }
 
-/// Returns package name that's used in import paths (converts to kebab case as that's idiomatic in TS).
-/// In TypeScript variable/module names, hyphens are not allowed, so we convert to underscores.
+/// Returns package name that's used in import paths (converts to camelCase for JavaScript naming conventions).
 pub fn package_import_name(pkg_name: Symbol) -> String {
-    pkg_name
-        .to_string()
-        .from_case(Case::Pascal)
-        .to_case(Case::Kebab)
-        .replace("-", "_")
+    let name = pkg_name.to_string();
+
+    // If the name contains underscores, it's likely in snake_case format
+    if name.contains('_') {
+        name.from_case(Case::Snake).to_case(Case::Camel)
+    } else {
+        // Otherwise, assume it's in PascalCase
+        name.from_case(Case::Pascal).to_case(Case::Camel)
+    }
 }
 
 fn struct_full_name<const HAS_SOURCE: SourceKind>(s: &model::Struct<HAS_SOURCE>) -> String {
