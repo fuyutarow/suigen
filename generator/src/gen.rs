@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
 
 use crate::model_builder::{TypeOriginTable, VersionTable};
@@ -38,6 +38,29 @@ const JS_STRICTLY_RESERVED_WORDS: [&str; 37] = [
 static ADDED_TYPE_IMPORTS: Lazy<Mutex<RefCell<std::collections::HashSet<String>>>> =
     Lazy::new(|| Mutex::new(RefCell::new(std::collections::HashSet::new())));
 
+// List of names that should only be imported as type-only imports
+static TYPE_ONLY_NAMES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
+    HashSet::from([
+        "PhantomReified",
+        "PhantomToTypeStr",
+        "PhantomTypeArgument",
+        "Reified",
+        "StructClass",
+        "ToField",
+        "ToPhantomTypeArgument",
+        "ToTypeStr",
+        "ToTypeArgument",
+        "TypeArgument",
+        "FieldsWithTypes",
+        "SuiClient",
+        "SuiObjectData",
+        "SuiParsedData",
+        "TransactionArgument",
+        "TransactionObjectInput",
+        "Vector",
+    ])
+});
+
 /// Returns module name that's used in import paths (converts kebab case as that's idiomatic in TS).
 /// In TypeScript variable/module names, hyphens are not allowed, so we convert to underscores.
 pub fn module_import_name(module: Symbol) -> String {
@@ -68,6 +91,8 @@ fn func_full_name<const HAS_SOURCE: SourceKind>(f: &model::Function<HAS_SOURCE>)
 
 pub struct FrameworkImportCtx {
     framework_rel_path: String,
+    // Track names that should only be imported as type-only imports
+    type_only_imports: RefCell<HashSet<String>>,
 }
 
 impl FrameworkImportCtx {
@@ -82,15 +107,27 @@ impl FrameworkImportCtx {
                 + "/_framework"
         };
 
-        FrameworkImportCtx { framework_rel_path }
+        FrameworkImportCtx {
+            framework_rel_path,
+            type_only_imports: RefCell::new(HashSet::new()),
+        }
     }
 
     fn import(&self, module: &str, name: &str) -> js::Import {
-        js::import(format!("{}/{}", self.framework_rel_path, module), name)
+        // Skip importing a name as a regular import if it's a known type-only import
+        // or if it's already marked for type-only import
+        if TYPE_ONLY_NAMES.contains(name) || self.type_only_imports.borrow().contains(name) {
+            // Return a special marker import that will be filtered out later
+            js::import("__SKIP_IMPORT__", name)
+        } else {
+            js::import(format!("{}/{}", self.framework_rel_path, module), name)
+        }
     }
 
     fn type_import(&self, module: &str, name: &str) -> js::Import {
-        // We need to return a type-only import for TypeScript
+        // Mark this name as a type-only import so we don't import it regularly
+        self.type_only_imports.borrow_mut().insert(name.to_string());
+
         // Add a special "type:" prefix to indicate this is a type import
         // This will be handled specially in the code generation
         js::import(format!("type:{}/{}", self.framework_rel_path, module), name)

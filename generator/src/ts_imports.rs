@@ -42,6 +42,33 @@ import type { TransactionArgument, TransactionObjectInput } from "@mysten/sui/tr
     .to_string()
 }
 
+/// Get the default import list for TypeScript struct files
+pub fn get_default_imports() -> Vec<TypedImport> {
+    vec![
+        // Non-type imports
+        ts_import("../../_framework/reified", "decodeFromFields", false),
+        ts_import(
+            "../../_framework/reified",
+            "decodeFromFieldsWithTypes",
+            false,
+        ),
+        ts_import("../../_framework/reified", "decodeFromJSONField", false),
+        ts_import("../../_framework/reified", "phantom", false),
+        ts_import("@mysten/sui/bcs", "bcs", false),
+        ts_import("@mysten/sui/utils", "fromB64", false),
+        // Type imports
+        ts_import("../../_framework/reified", "PhantomReified", true),
+        ts_import("../../_framework/reified", "Reified", true),
+        ts_import("../../_framework/reified", "StructClass", true),
+        ts_import("../../_framework/reified", "ToField", true),
+        ts_import("../../_framework/reified", "ToTypeStr", true),
+        ts_import("../../_framework/util", "FieldsWithTypes", true),
+        ts_import("@mysten/sui/client", "SuiClient", true),
+        ts_import("@mysten/sui/client", "SuiObjectData", true),
+        ts_import("@mysten/sui/client", "SuiParsedData", true),
+    ]
+}
+
 /// Manually format import into a JavaScript token
 pub fn format_typed_import(imports: &[TypedImport]) -> js::Tokens {
     let mut tokens = js::Tokens::new();

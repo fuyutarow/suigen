@@ -2,6 +2,14 @@
 name = "suigen"
 version = "0.3.2"
 edition = "2021"
+description = "Generate TS SDKs for Sui Move smart contracts."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "suigen"
+path = "src/main.rs"
 
 [dependencies]
 tokio = "1.44.2"

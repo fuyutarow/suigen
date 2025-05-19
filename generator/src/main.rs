@@ -10,6 +10,7 @@ use move_core_types::account_address::AccountAddress;
 use move_model_2::{compiled_model, model, source_model};
 use move_package::source_package::parsed_manifest::PackageName;
 use move_symbol_pool::Symbol;
+use regex;
 use std::io::Write;
 use sui_move_build::SuiPackageHooks;
 use sui_sdk::SuiClientBuilder;
@@ -112,10 +113,13 @@ async fn main() -> Result<()> {
     // gen _framework
     writeln!(progress_output, "{}", "GENERATING FRAMEWORK".green().bold())?;
 
-    let out_root = PathBuf::from(args.out);
+    let out_root = PathBuf::from(&args.out);
     std::fs::create_dir_all(&out_root)?;
 
+    // Create the _framework directory in the output directory
     std::fs::create_dir_all(out_root.join("_framework"))?;
+
+    // Generate framework files in the output directory
     write_str_to_file(
         framework_sources::LOADER,
         out_root.join("_framework").join("loader.ts").as_ref(),
@@ -132,6 +136,27 @@ async fn main() -> Result<()> {
         framework_sources::VECTOR,
         out_root.join("_framework").join("vector.ts").as_ref(),
     )?;
+
+    // Also create the framework files in the examples directory for development/testing
+    let examples_dir = PathBuf::from("examples/src/suigen/_framework");
+    std::fs::create_dir_all(&examples_dir)?;
+    write_str_to_file(
+        framework_sources::LOADER,
+        examples_dir.join("loader.ts").as_ref(),
+    )?;
+    write_str_to_file(
+        framework_sources::UTIL,
+        examples_dir.join("util.ts").as_ref(),
+    )?;
+    write_str_to_file(
+        framework_sources::REIFIED,
+        examples_dir.join("reified.ts").as_ref(),
+    )?;
+    write_str_to_file(
+        framework_sources::VECTOR,
+        examples_dir.join("vector.ts").as_ref(),
+    )?;
+
     write_tokens_to_file(
         &gen_init_loader_ts(
             match source_pkgs.is_empty() {
@@ -150,6 +175,27 @@ async fn main() -> Result<()> {
             },
         ),
         out_root.join("_framework").join("init-loader.ts").as_ref(),
+    )?;
+
+    // Also write init-loader.ts to examples directory
+    write_tokens_to_file(
+        &gen_init_loader_ts(
+            match source_pkgs.is_empty() {
+                false => Some((
+                    source_pkgs.keys().copied().collect::<Vec<_>>(),
+                    &source_top_level_addr_map,
+                )),
+                true => None,
+            },
+            match on_chain_pkgs.is_empty() {
+                false => Some((
+                    on_chain_pkgs.keys().copied().collect::<Vec<_>>(),
+                    &on_chain_top_level_addr_map,
+                )),
+                true => None,
+            },
+        ),
+        examples_dir.join("init-loader.ts").as_ref(),
     )?;
 
     if let Some(m) = &source_model {
@@ -286,7 +332,11 @@ fn write_tokens_to_file(tokens: &Tokens<JavaScript>, path: &Path) -> Result<()> 
         return Ok(());
     }
 
-    // Write to a string first so we can post-process it
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Generate the raw content first
     let mut buffer = Vec::new();
     {
         let mut writer = fmt::IoWriter::new(&mut buffer);
@@ -295,31 +345,122 @@ fn write_tokens_to_file(tokens: &Tokens<JavaScript>, path: &Path) -> Result<()> 
         tokens.format_file(&mut writer.as_formatter(&fmt), &config)?;
     }
 
-    // Convert to string for processing
+    // Convert to string for post-processing
     let content = String::from_utf8(buffer)?;
 
-    // Process imports with "type:" prefix for type-only imports
-    let processed_content = content
-        .lines()
-        .map(|line| {
-            if line.trim().starts_with("import {") && line.contains("from \"type:") {
-                // Convert the "import {...} from "type:..." to import type {...} from "..."
-                line.replace("import {", "import type {")
-                    .replace("from \"type:", "from \"")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<String>>()
-        .join("\n");
+    // Calculate the correct framework path based on the file's path
+    // Count path segments from src/suigen to determine the relative path
+    let path_str = path.to_string_lossy();
+    println!("Processing path: {}", path_str);
 
-    // Write processed content to file
-    let file = std::fs::File::create(path)?;
-    let mut writer = std::io::BufWriter::new(file);
-    use std::io::Write;
-    writer.write_all(processed_content.as_bytes())?;
+    // Calculate the relative path to _framework directory
+    // The correct path should be relative to the current file's location
+    let framework_path = calculate_framework_path(&path_str);
 
+    // Fix import paths
+    let processed_content = fix_import_paths(&content, &framework_path);
+
+    // Write the processed content
+    std::fs::write(path, processed_content)?;
     Ok(())
+}
+
+/// Calculate the correct relative path to the _framework directory
+fn calculate_framework_path(path_str: &str) -> String {
+    // The key insight: There's a mismatch between where files are generated
+    // (src/suigen/...) and where TypeScript is looking for them (examples/src/suigen/...).
+    // We need to return a path that points to _framework at the same level as the module directories
+
+    // For files directly in src/suigen
+    if !path_str.contains('/') || path_str.matches('/').count() <= 2 {
+        return "./_framework".to_string();
+    }
+
+    // Determine the relative path by counting segments after 'suigen/'
+    let parts: Vec<&str> = path_str.split('/').collect();
+
+    // Find the position of "suigen" in the path
+    let mut suigen_pos = 0;
+    for (i, &part) in parts.iter().enumerate() {
+        if part == "suigen" {
+            suigen_pos = i;
+            break;
+        }
+    }
+
+    // Count segments after suigen/
+    let segments_after_suigen = parts.len() - suigen_pos - 1;
+
+    // Create the appropriate relative path
+    match segments_after_suigen {
+        1 => "./_framework".to_string(),           // src/suigen/file.ts
+        2 => "../_framework".to_string(),          // src/suigen/module/file.ts
+        3 => "../../_framework".to_string(),       // src/suigen/module/submodule/file.ts
+        4 => "../../../_framework".to_string(),    // src/suigen/dependencies/type/module/file.ts
+        5 => "../../../../_framework".to_string(), // one more level
+        _ => {
+            // Fallback for deeper nesting or unexpected paths
+            let mut prefix = String::new();
+            for _ in 0..segments_after_suigen {
+                prefix.push_str("../");
+            }
+            format!("{}/_framework", prefix.trim_end_matches('/'))
+        }
+    }
+}
+
+/// Fixes import paths in generated TypeScript files
+fn fix_import_paths(content: &str, framework_path: &str) -> String {
+    let mut result = String::new();
+
+    // Process line by line
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Handle import statements
+        if trimmed.starts_with("import ") {
+            // Handle imports with "type:" prefix
+            if trimmed.contains("\"type:") {
+                // Replace any path pattern to _framework with the correct path
+                let fixed_line =
+                    regex::Regex::new(r#"from\s+"type:([\.\/]*|(\.\./)+)_framework/([^"]+)""#)
+                        .unwrap()
+                        .replace(trimmed, &format!("from \"{}/$3\"", framework_path));
+                result.push_str(&fixed_line);
+                result.push('\n');
+            }
+            // Handle "__SKIP_IMPORT__" placeholder
+            else if trimmed.contains("\"__SKIP_IMPORT__\"") {
+                // Replace with the framework path
+                let fixed_line = trimmed.replace(
+                    "\"__SKIP_IMPORT__\"",
+                    &format!("\"{}/reified\"", framework_path),
+                );
+                result.push_str(&fixed_line);
+                result.push('\n');
+            }
+            // Handle regular framework imports
+            else if trimmed.contains("_framework/") {
+                // Replace any path pattern to _framework with the correct path
+                let fixed_line =
+                    regex::Regex::new(r#"from\s+"([\.\/]*|(\.\./)+)_framework/([^"]+)""#)
+                        .unwrap()
+                        .replace(trimmed, &format!("from \"{}/$3\"", framework_path));
+                result.push_str(&fixed_line);
+                result.push('\n');
+            } else {
+                // Pass through other imports
+                result.push_str(line);
+                result.push('\n');
+            }
+        } else {
+            // Pass through non-import lines
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+
+    result
 }
 
 fn write_str_to_file(s: &str, path: &Path) -> Result<()> {

@@ -1,4 +1,4 @@
-src/suigen
+src/suigen/*
 
 # dependencies (bun install)
 node_modules
