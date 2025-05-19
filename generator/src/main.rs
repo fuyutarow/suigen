@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use clap::*;
 use colored::*;
+use convert_case::{Case, Casing};
 use genco::fmt;
 use genco::prelude::*;
 use move_core_types::account_address::AccountAddress;
@@ -222,9 +223,22 @@ fn gen_top_level_barrel_file(
         }
     };
 
+    // Helper function to generate PascalCase path for imports
+    let get_pascal_case_path = |pkg_name: Symbol| {
+        let name = pkg_name.to_string();
+        // If the name contains underscores, it's likely in snake_case format
+        if name.contains('_') {
+            name.from_case(Case::Snake).to_case(Case::Pascal)
+        } else {
+            // Already in PascalCase or ensure it is
+            name.from_case(Case::Camel).to_case(Case::Pascal)
+        }
+    };
+
     // Add exports for source packages
     for (_, pkg_name) in source_top_level_pkg_names.iter() {
         let safe_import_name = get_safe_import_name(*pkg_name);
+        let pascal_case_path = get_pascal_case_path(*pkg_name);
 
         // Skip if we've already exported this name (avoids duplicates)
         if !exported_names.insert(safe_import_name.clone()) {
@@ -233,13 +247,14 @@ fn gen_top_level_barrel_file(
 
         barrel_content.push_str(&format!(
             "export * as {} from './{}';\n",
-            safe_import_name, safe_import_name
+            safe_import_name, pascal_case_path
         ));
     }
 
     // Add exports for on-chain packages
     for (_, pkg_name) in on_chain_top_level_pkg_names.iter() {
         let safe_import_name = get_safe_import_name(*pkg_name);
+        let pascal_case_path = get_pascal_case_path(*pkg_name);
 
         // Skip if we've already exported this name (avoids duplicates)
         if !exported_names.insert(safe_import_name.clone()) {
@@ -248,7 +263,7 @@ fn gen_top_level_barrel_file(
 
         barrel_content.push_str(&format!(
             "export * as {} from './{}';\n",
-            safe_import_name, safe_import_name
+            safe_import_name, pascal_case_path
         ));
     }
 
@@ -401,8 +416,29 @@ fn gen_packages_for_model<const HAS_SOURCE: usize>(
             }
         };
 
+        // Convert package name to PascalCase for directory name
+        let pascal_case_pkg_name = match top_level_pkg_names.get(pkg_id) {
+            Some(pkg_name) => {
+                let name = pkg_name.to_string();
+                // If the name contains underscores, it's likely in snake_case format
+                if name.contains('_') {
+                    name.from_case(Case::Snake).to_case(Case::Pascal)
+                } else {
+                    // Already in PascalCase or ensure it is
+                    name.from_case(Case::Camel).to_case(Case::Pascal)
+                }
+            }
+            None => {
+                let dep_dir = match is_source {
+                    true => "source",
+                    false => "onchain",
+                };
+                format!("{}/{}", dep_dir, pkg_id.to_hex_literal())
+            }
+        };
+
         let package_path = out_root.join(match top_level_pkg_names.get(pkg_id) {
-            Some(_) => PathBuf::from(safe_pkg_import_name),
+            Some(_) => PathBuf::from(pascal_case_pkg_name),
             None => PathBuf::from("_dependencies")
                 .join(match is_source {
                     true => "source",
